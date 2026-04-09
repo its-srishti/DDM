@@ -52,7 +52,7 @@ def simulate_ddm(v, a, z, t0, n_trials, dt=0.001, max_time=5.0):
     
     return np.array(results)
 
-def ddm_log_likelihood(data, v, a, z, t0, K=7):
+def ddm_log_likelihood(data, v, a, z, t0, K=20):
     """
     Compute log-likelihood of data under DDM parameters.
     Uses the series solution (Feller 1968, Bogacz et al. 2006).
@@ -64,56 +64,55 @@ def ddm_log_likelihood(data, v, a, z, t0, K=7):
     
     Returns:
         scalar log-likelihood (negative infinity if parameters invalid)
+        K=20 ensures convergence for fast reaction times.
     """
     # Parameter bounds — return impossible value if violated
-    if a <= 0 or z <= 0 or z >= 1 or t0 <= 0:
+   if a <= 0 or z <= 0 or z >= 1 or t0 <= 0:
         return -1e10
     
-    # Check t0 is less than all observed RTs
-    if t0 >= np.min(data[:, 0]):
+    # Check t0 against data
+    min_rt = np.min(data[:, 0])
+    if t0 >= min_rt:
         return -1e10
     
     log_lik = 0.0
-    k_vals = np.arange(1, K + 1)  # k = 1, 2, 3, ..., K
+    k_vals = np.arange(1, K + 1)
     
     for rt, choice in data:
-        # Decision time = RT minus non-decision time
         t = rt - t0
-        
         if t <= 0:
             log_lik += -1e10
             continue
-        
-        # Series terms — shared between upper and lower
-        # exp(−k²π²t / 2a²) decays fast, so series converges quickly
+
+        # Common decay term
         decay = np.exp(-k_vals**2 * np.pi**2 * t / (2 * a**2))
         
+        # Shared drift-time correction component
+        drift_correction = -0.5 * v**2 * t
+        
         if choice == 1:
-            # Upper boundary response
-            # Change of measure term: exp(v*a*z - v²t/2)
-            change_of_measure = np.exp(v * a * z - 0.5 * v**2 * t)
-            
-            # Eigenfunction terms: k * sin(k*pi*z)
+            # UPPER BOUNDARY: Exponent uses z
+            # arg = (v * a * z) - 0.5 * v**2 * t
+            arg = (v * a * z) + drift_correction
             eigen = k_vals * np.sin(k_vals * np.pi * z)
-            
-            # Full series
-            series = np.sum(eigen * decay)
-            density = (np.pi / a**2) * change_of_measure * series
-        
         else:
-            # Lower boundary response
-            # Mirror image: replace z with (1-z)
-            change_of_measure = np.exp(-v * a * (1 - z) - 0.5 * v**2 * t)
+            # LOWER BOUNDARY: Exponent does NOT use (1-z)
+            # This fixes the z-inversion (0.3 -> 0.7) bug.
+            # arg = (v * a * 0) - 0.5 * v**2 * t
+            arg = drift_correction
             eigen = k_vals * np.sin(k_vals * np.pi * (1 - z))
-            series = np.sum(eigen * decay)
-            density = (np.pi / a**2) * change_of_measure * series
         
-        # Guard against numerical issues
-        if density <= 0 or not np.isfinite(density):
+        # Apply Clipping to exponent argument to prevent Overflow
+        change_of_measure = np.exp(np.clip(arg, -500, 500))
+        
+        series = np.sum(eigen * decay)
+        density = (np.pi / a**2) * change_of_measure * series
+        
+        if density <= 1e-10 or not np.isfinite(density):
             log_lik += -1e10
         else:
             log_lik += np.log(density)
-    
+            
     return log_lik
 
 def fit_ddm(data, n_starts=5):
@@ -140,16 +139,14 @@ def fit_ddm(data, n_starts=5):
     for start in range(n_starts):
         # Random starting point within reasonable bounds
         # Different start each iteration to avoid local optima
-        if start == 0:
-            # First start: sensible default
-            x0 = [0.5, 1.0, 0.5, min_rt * 0.5]
+         if start == 0:
+            x0 = [0.5, 1.0, 0.5, min_rt * 0.8]
         else:
-            # Subsequent starts: random
             x0 = [
-                np.random.uniform(-1.5, 1.5),   # v
-                np.random.uniform(0.5, 2.0),     # a
-                np.random.uniform(0.2, 0.8),     # z
-                np.random.uniform(0.05, min_rt * 0.8)  # t0
+                np.random.uniform(-2.0, 2.0),
+                np.random.uniform(0.5, 2.5),
+                np.random.uniform(0.1, 0.9),
+                np.random.uniform(0.01, min_rt * 0.9)
             ]
         
         result = minimize(
@@ -157,9 +154,9 @@ def fit_ddm(data, n_starts=5):
             x0,
             method='Nelder-Mead',
             options={
-                'maxiter': 5000,
-                'xatol': 1e-4,
-                'fatol': 1e-4
+                'maxiter': 3000,
+                'xatol': 1e-3,
+                'fatol': 1e-3
             }
         )
         
