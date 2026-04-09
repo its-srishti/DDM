@@ -67,7 +67,7 @@ def ddm_log_likelihood(data, v, a, z, t0, K=20):
         K=20 ensures convergence for fast reaction times.
     """
     # Parameter bounds — return impossible value if violated
-   if a <= 0 or z <= 0 or z >= 1 or t0 <= 0:
+    if a <= 0 or z <= 0 or z >= 1 or t0 <= 0:
         return -1e10
     
     # Check t0 against data
@@ -141,7 +141,7 @@ def fit_ddm(data, n_starts=5):
         # Different start each iteration to avoid local optima
          if start == 0:
             x0 = [0.5, 1.0, 0.5, min_rt * 0.8]
-        else:
+         else:
             x0 = [
                 np.random.uniform(-2.0, 2.0),
                 np.random.uniform(0.5, 2.5),
@@ -149,7 +149,7 @@ def fit_ddm(data, n_starts=5):
                 np.random.uniform(0.01, min_rt * 0.9)
             ]
         
-        result = minimize(
+         result = minimize(
             neg_log_lik,
             x0,
             method='Nelder-Mead',
@@ -160,7 +160,7 @@ def fit_ddm(data, n_starts=5):
             }
         )
         
-        if result.fun < best_nll:
+         if result.fun < best_nll:
             best_nll = result.fun
             best_result = result
     
