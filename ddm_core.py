@@ -52,69 +52,46 @@ def simulate_ddm(v, a, z, t0, n_trials, dt=0.001, max_time=5.0):
     
     return np.array(results)
 
-def ddm_log_likelihood(data, v, a, z, t0, K=7):
-    """
-    Compute log-likelihood of data under DDM parameters.
-    Uses the series solution (Feller 1968, Bogacz et al. 2006).
-    
-    Parameters:
-        data : array of shape (n_trials, 2), columns = [rt, choice]
-        v, a, z, t0 : DDM parameters
-        K : number of series terms (7 is sufficient for convergence)
-    
-    Returns:
-        scalar log-likelihood (negative infinity if parameters invalid)
-    """
-    # Parameter bounds — return impossible value if violated
+def ddm_log_likelihood(data, v, a, z, t0, K=50):
     if a <= 0 or z <= 0 or z >= 1 or t0 <= 0:
         return -1e10
     
-    # Check t0 is less than all observed RTs
-    if t0 >= np.min(data[:, 0]):
+    min_obs_rt = np.min(data[:, 0])
+    if t0 >= min_obs_rt:
         return -1e10
     
+    k_vals = np.arange(1, K + 1)
+    
+    def pdf_upper(t, v, a, z):
+        decay = np.exp(-k_vals**2 * np.pi**2 * t / (2 * a**2))
+        factor = (np.pi / a**2) * np.exp(
+            np.clip(v * a * (1-z) - 0.5 * v**2 * t, -500, 500)
+        )
+        series = np.sum(k_vals * np.sin(k_vals * np.pi * (1-z)) * decay)
+        return factor * series
+    
     log_lik = 0.0
-    k_vals = np.arange(1, K + 1)  # k = 1, 2, 3, ..., K
     
     for rt, choice in data:
-        # Decision time = RT minus non-decision time
         t = rt - t0
-        
         if t <= 0:
             log_lik += -1e10
             continue
         
-        # Series terms — shared between upper and lower
-        # exp(−k²π²t / 2a²) decays fast, so series converges quickly
-        decay = np.exp(-k_vals**2 * np.pi**2 * t / (2 * a**2))
-        
         if choice == 1:
-            # Upper boundary response
-            # Change of measure term: exp(v*a*z - v²t/2)
-            change_of_measure = np.exp(v * a * z - 0.5 * v**2 * t)
-            
-            # Eigenfunction terms: k * sin(k*pi*z)
-            eigen = k_vals * np.sin(k_vals * np.pi * z)
-            
-            # Full series
-            series = np.sum(eigen * decay)
-            density = (np.pi / a**2) * change_of_measure * series
-        
+            density = pdf_upper(t, v, a, z)
         else:
-            # Lower boundary response
-            # Mirror image: replace z with (1-z)
-            change_of_measure = np.exp(-v * a * (1 - z) - 0.5 * v**2 * t)
-            eigen = k_vals * np.sin(k_vals * np.pi * (1 - z))
-            series = np.sum(eigen * decay)
-            density = (np.pi / a**2) * change_of_measure * series
+            density = pdf_upper(t, -v, a, 1 - z)
         
-        # Guard against numerical issues
-        if density <= 0 or not np.isfinite(density):
+        if density <= 1e-10 or not np.isfinite(density):
             log_lik += -1e10
         else:
             log_lik += np.log(density)
     
     return log_lik
+
+
+from scipy.optimize import minimize
 
 def fit_ddm(data, n_starts=5):
     """
@@ -136,6 +113,13 @@ def fit_ddm(data, n_starts=5):
     
     best_result = None
     best_nll = np.inf
+
+    bounds = [
+        (0.0, 5.0),          # v > 0  ← this breaks the symmetry
+        (0.1, 5.0),          # a > 0
+        (0.05, 0.95),        # z in (0,1)
+        (0.01, min_rt * 0.9) # t0 < min RT
+    ]
     
     for start in range(n_starts):
         # Random starting point within reasonable bounds
@@ -146,7 +130,7 @@ def fit_ddm(data, n_starts=5):
         else:
             # Subsequent starts: random
             x0 = [
-                np.random.uniform(-1.5, 1.5),   # v
+                np.random.uniform(0.0, 1.5),   # v
                 np.random.uniform(0.5, 2.0),     # a
                 np.random.uniform(0.2, 0.8),     # z
                 np.random.uniform(0.05, min_rt * 0.8)  # t0
@@ -155,11 +139,11 @@ def fit_ddm(data, n_starts=5):
         result = minimize(
             neg_log_lik,
             x0,
-            method='Nelder-Mead',
+            method='L-BFGS-B',
+            bounds=bounds,
             options={
                 'maxiter': 5000,
-                'xatol': 1e-4,
-                'fatol': 1e-4
+                'ftol': 1e-9
             }
         )
         
@@ -176,5 +160,4 @@ def fit_ddm(data, n_starts=5):
         't0': t0_est,
         'log_likelihood': -best_nll,
         'converged': best_result.success
-    }
-    
+    }    
