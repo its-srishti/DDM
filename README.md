@@ -1,6 +1,6 @@
-# Drift-Diffusion Model — From Scratch
+# Drift-Diffusion Model
 
-A hand-coded implementation of the Drift-Diffusion Model (DDM) in Python, covering simulation, analytical likelihood, and MLE-based parameter estimation — built without relying on existing toolboxes like HDDM or PyDDM.
+A hand-coded implementation of the Drift-Diffusion Model (DDM) in Python, covering simulation, analytical likelihood, and MLE-based parameter estimation - validated through PyDDM.
 
 ---
 
